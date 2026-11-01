@@ -1,0 +1,61 @@
+name: Build QGIS plugin ZIP
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Export2kmz/**'
+      - '.github/workflows/build-plugin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate plugin structure
+        run: |
+          test -f Export2kmz/__init__.py
+          test -f Export2kmz/metadata.txt
+          test -f Export2kmz/export2kmz.py
+
+      - name: Create installable ZIP
+        run: |
+          rm -f Export2kmz.zip
+          zip -r Export2kmz.zip Export2kmz \
+            -x '*/__pycache__/*' '*.pyc' '*.pyo' '*.DS_Store'
+          unzip -l Export2kmz.zip
+
+      - name: Upload ZIP as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Export2kmz-QGIS3
+          path: Export2kmz.zip
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish or update latest downloadable build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "$GITHUB_SHA"
+          git push origin refs/tags/latest --force
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest Export2kmz.zip --clobber
+            gh release edit latest --title "Export2kmz - Latest build" --notes "Automatically packaged from the latest main branch commit: $GITHUB_SHA"
+          else
+            gh release create latest Export2kmz.zip \
+              --title "Export2kmz - Latest build" \
+              --notes "Automatically packaged from the latest main branch commit: $GITHUB_SHA" \
+              --prerelease
+          fi
