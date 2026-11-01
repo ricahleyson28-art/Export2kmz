@@ -174,13 +174,13 @@ class ExportProgressDialog(QDialog):
         self.current=QLabel("正在准备导出任务…"); self.current.setObjectName("muted"); root.addWidget(self.current)
         self.bar=QProgressBar(); self.bar.setRange(0,100); self.bar.setValue(0); root.addWidget(self.bar)
         self.percent=QLabel("0%"); self.percent.setAlignment(Qt.AlignRight); root.addWidget(self.percent)
-        root.addWidget(QFrame(frameShape=QFrame.HLine,frameShadow=QFrame.Sunken))
+        separator = QFrame(); separator.setFrameShape(QFrame.HLine); separator.setFrameShadow(QFrame.Sunken); root.addWidget(separator)
         self.steps=[]
         for label in ("读取图层信息 …","转换坐标系（EPSG:4326）…","生成 KML 文件 …","打包为 KMZ …"):
             row=QHBoxLayout(); text_label=QLabel(label); status=QLabel("○ 等待中…")
             status.setMinimumWidth(112); status.setAlignment(Qt.AlignRight|Qt.AlignVCenter); status.setStyleSheet("color:#94a3b8;")
             row.addWidget(text_label,1); row.addWidget(status); root.addLayout(row); self.steps.append((text_label,status))
-        root.addWidget(QFrame(frameShape=QFrame.HLine,frameShadow=QFrame.Sunken))
+        separator = QFrame(); separator.setFrameShape(QFrame.HLine); separator.setFrameShadow(QFrame.Sunken); root.addWidget(separator)
         buttons=QHBoxLayout(); buttons.addStretch(1); cancel_btn=QPushButton("取消"); cancel_btn.clicked.connect(self.cancel); buttons.addWidget(cancel_btn); root.addLayout(buttons)
 
     def cancel(self):
@@ -226,7 +226,7 @@ class ExportSuccessDialog(QDialog):
         path_row=QHBoxLayout(); path_label=QLabel(path); path_label.setObjectName("pathBox"); path_label.setWordWrap(True); path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         copy_btn=QPushButton("复制"); copy_btn.setObjectName("secondary"); copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.path))
         path_row.addWidget(path_label,1); path_row.addWidget(copy_btn); root.addLayout(path_row)
-        root.addWidget(QFrame(frameShape=QFrame.HLine,frameShadow=QFrame.Sunken))
+        separator = QFrame(); separator.setFrameShape(QFrame.HLine); separator.setFrameShadow(QFrame.Sunken); root.addWidget(separator)
         heading=QLabel("导出统计"); heading.setStyleSheet("font-weight:700;font-size:11pt;"); root.addWidget(heading)
         for label,value in (("图层数量",str(layer_count)),("导出要素总数","{:,}".format(total_count)),("点要素","{:,}".format(stats.get("point",0))),("线要素","{:,}".format(stats.get("line",0))),("面要素","{:,}".format(stats.get("polygon",0)))):
             row=QHBoxLayout(); key=QLabel(label); val=QLabel(value); val.setAlignment(Qt.AlignRight|Qt.AlignVCenter); val.setStyleSheet("font-weight:600;"); row.addWidget(key,1); row.addWidget(val); root.addLayout(row)
@@ -306,6 +306,7 @@ class ExportDialog(QDialog):
         header.setSectionResizeMode(7, QHeaderView.Stretch)
         header.setStretchLastSection(False)
         self.table.setMinimumHeight(260)
+        self.table.verticalHeader().setDefaultSectionSize(31)
         layout.addWidget(self.table)
 
         bottom = QHBoxLayout()
@@ -635,6 +636,8 @@ def export_kmz(output_path, selected, include_attributes=True, progress=None):
         progress.setLabelText("正在生成 KMZ 文件…")
         QApplication.processEvents()
 
+    if progress and progress.wasCanceled():
+        raise InterruptedError("用户取消了导出。")
     xml = ET.tostring(doc, encoding="utf-8", xml_declaration=True)
     output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
