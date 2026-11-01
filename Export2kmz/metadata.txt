@@ -2,11 +2,11 @@
 name=Export2KMZ
 qgisMinimumVersion=3.16
 description=Export project vector layers to KMZ with per-layer name and optional Description fields.
-version=1.0.1
+version=1.0.2
 author=Export2KMZ contributors
 email=
 about=Exports enabled vector layers to a Google Earth KMZ file. Supports per-layer description fields, geometry styling, and EPSG:4326 output.
 category=Vector
-icon=
+icon=icon.svg
 experimental=False
 deprecated=False
