@@ -11,9 +11,10 @@ from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QFileDialog, QMessageBox,
-    QHeaderView, QComboBox, QLabel, QCheckBox, QAbstractItemView
+    QHeaderView, QComboBox, QLabel, QCheckBox, QAbstractItemView,
+    QProgressDialog, QApplication
 )
-from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtGui import QColor, QIcon
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsWkbTypes, QgsCoordinateReferenceSystem,
     QgsCoordinateTransform, QgsGeometry
@@ -363,19 +364,46 @@ class ExportDialog(QDialog):
         if not selected:
             QMessageBox.warning(self, "KMZ导出工具", "请至少选择一个图层。")
             return
+
+        progress = QProgressDialog("正在准备导出…", "取消", 0, 100, self)
+        progress.setWindowTitle("Export2KMZ")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.resize(430, 120)
+        progress.show()
+        QApplication.processEvents()
         try:
-            export_kmz(path, selected, self.attrs.isChecked())
-            QMessageBox.information(self, "KMZ导出工具", "导出成功：\n" + path)
+            count = export_kmz(path, selected, self.attrs.isChecked(), progress)
+            progress.setValue(100)
+            progress.setLabelText("导出完成。")
+            QApplication.processEvents()
+            progress.close()
+            QMessageBox.information(
+                self, "导出成功",
+                "KMZ 导出成功！\\n\\n文件位置：\\n{}\\n\\n导出要素数量：{} 个".format(path, count)
+            )
             self.accept()
+        except InterruptedError:
+            progress.close()
+            QMessageBox.information(self, "KMZ导出工具", "导出已取消。")
         except Exception as exc:
+            progress.close()
             QMessageBox.critical(self, "导出失败", str(exc))
 
-
-def export_kmz(output_path, selected, include_attributes=True):
+def export_kmz(output_path, selected, include_attributes=True, progress=None):
     doc = ET.Element(qn("kml"))
     document = ET.SubElement(doc, qn("Document"))
     add_text(document, "name", os.path.basename(output_path))
     target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+    total_features = sum(item["layer"].featureCount() for item in selected)
+    processed = 0
+    exported_count = 0
+    if progress:
+        progress.setValue(0)
+        progress.setLabelText("正在导出图层…")
+        QApplication.processEvents()
 
     for item in selected:
         layer = item["layer"]
@@ -410,6 +438,8 @@ def export_kmz(output_path, selected, include_attributes=True):
         desc_field = item["description"].currentData() or ""
         group_folders = {}
         for feature in layer.getFeatures():
+            if progress and progress.wasCanceled():
+                raise InterruptedError("用户取消了导出。")
             geom = feature.geometry()
             if geom is None or geom.isEmpty():
                 continue
@@ -443,6 +473,23 @@ def export_kmz(output_path, selected, include_attributes=True):
             geometry_node = geometry_to_kml(geom, transform)
             if geometry_node is not None:
                 placemark.append(geometry_node)
+                exported_count += 1
+
+            processed += 1
+            if progress:
+                value = int(processed * 95 / max(total_features, 1))
+                progress.setValue(value)
+                progress.setLabelText(
+                    "正在导出：{}  |  已处理 {} / {} 个要素".format(
+                        layer.name(), processed, total_features
+                    )
+                )
+                QApplication.processEvents()
+
+    if progress:
+        progress.setValue(97)
+        progress.setLabelText("正在生成 KMZ 文件…")
+        QApplication.processEvents()
 
     xml = ET.tostring(doc, encoding="utf-8", xml_declaration=True)
     output_path = os.path.abspath(output_path)
@@ -453,6 +500,7 @@ def export_kmz(output_path, selected, include_attributes=True):
             stream.write(xml)
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(kml_path, "doc.kml")
+    return exported_count
 
 
 class Export2KmzPlugin:
@@ -461,7 +509,8 @@ class Export2KmzPlugin:
         self.action = None
 
     def initGui(self):
-        self.action = QAction("Export2KMZ", self.iface.mainWindow())
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.svg")
+        self.action = QAction(QIcon(icon_path), "Export2KMZ", self.iface.mainWindow())
         self.action.triggered.connect(self.run)
         self.iface.addPluginToMenu("&Export2KMZ", self.action)
         self.iface.addToolBarIcon(self.action)
