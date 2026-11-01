@@ -12,7 +12,7 @@ from qgis.PyQt.QtWidgets import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QFileDialog, QMessageBox,
     QHeaderView, QComboBox, QLabel, QCheckBox, QAbstractItemView,
-    QProgressDialog, QApplication, QProgressBar
+    QProgressDialog, QApplication, QProgressBar, QFrame
 )
 from qgis.PyQt.QtGui import QColor, QIcon
 from qgis.core import (
@@ -151,10 +151,10 @@ class ExportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("KMZ导出工具")
-        self.resize(980, 590)
-        self.setMinimumWidth(760)
+        self.resize(1120, 700)
+        self.setMinimumSize(900, 540)
         self.setStyleSheet("""
-            QDialog { background: #f5f7fb; color: #172033; font-family: "Microsoft YaHei UI", "Segoe UI"; font-size: 10pt; }
+            QDialog { background: #f4f7fc; color: #172033; font-family: "Microsoft YaHei UI", "Segoe UI"; font-size: 10pt; }
             QPushButton { background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 13px; color: #172033; }
             QPushButton:hover { background: #edf5ff; border-color: #6aa7ff; }
             QPushButton#primaryButton { background: #1677ff; color: white; border: 1px solid #1677ff; font-weight: 600; }
@@ -171,6 +171,21 @@ class ExportDialog(QDialog):
 
     def build_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 14)
+        layout.setSpacing(10)
+        title_row = QHBoxLayout()
+        title_icon = QLabel("🗺️")
+        title_icon.setStyleSheet("font-size: 22pt; padding: 0 5px;")
+        title_stack = QVBoxLayout()
+        title = QLabel("Export2KMZ")
+        title.setStyleSheet("font-size: 15pt; font-weight: 700; color: #14213d; padding: 2px 4px;")
+        subtitle = QLabel("将 QGIS 矢量图层导出为 Google Earth KMZ")
+        subtitle.setStyleSheet("color: #64748b; padding: 0 4px 5px 4px;")
+        title_stack.addWidget(title)
+        title_stack.addWidget(subtitle)
+        title_row.addWidget(title_icon)
+        title_row.addLayout(title_stack, 1)
+        layout.addLayout(title_row)
         top = QHBoxLayout()
         self.all_btn = QPushButton("☑ 全选")
         self.invert_btn = QPushButton("✕ 反选")
@@ -187,9 +202,9 @@ class ExportDialog(QDialog):
         top.addWidget(self.import_template_btn)
         layout.addLayout(top)
 
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ["启用", "图层", "几何类型", "字段分组", "配置样式", "图标配置", "Description"])
+            ["启用", "图层", "几何类型", "字段分组", "配置样式", "状态", "图标配置", "Description"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
@@ -201,7 +216,9 @@ class ExportDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         for c in range(3, 7):
             header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.Stretch)
         header.setStretchLastSection(False)
+        self.table.setMinimumHeight(260)
         layout.addWidget(self.table)
 
         bottom = QHBoxLayout()
@@ -256,16 +273,22 @@ class ExportDialog(QDialog):
             style.addItems(["默认样式", "基础样式"])
             self.table.setCellWidget(row, 4, style)
 
+            status = QTableWidgetItem("● 默认")
+            status.setTextAlignment(Qt.AlignCenter)
+            status.setForeground(QColor("#64748b"))
+            status.setFlags(status.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row, 5, status)
+
             icon = QComboBox()
             icon.addItems(["默认", "空心圆环", "圆点", "方形"])
             icon.setEnabled(QgsWkbTypes.geometryType(layer.wkbType()) == QgsWkbTypes.PointGeometry)
-            self.table.setCellWidget(row, 5, icon)
+            self.table.setCellWidget(row, 6, icon)
 
             desc = QComboBox()
             desc.addItem("(不添加说明)", "")
             for field in layer.fields():
                 desc.addItem(field.name(), field.name())
-            self.table.setCellWidget(row, 6, desc)
+            self.table.setCellWidget(row, 7, desc)
             self.controls.append({
                 "layer": layer, "group": group, "style": style,
                 "icon": icon, "description": desc
@@ -273,7 +296,12 @@ class ExportDialog(QDialog):
         self.table.resizeColumnsToContents()
         # Keep the layer-name column content-sized but prevent very long names
         # from making the whole dialog unwieldy.
-        self.table.setColumnWidth(1, min(self.table.columnWidth(1), 260))
+        self.table.setColumnWidth(1, min(max(self.table.columnWidth(1), 125), 260))
+        self.table.setColumnWidth(0, 52)
+        self.table.setColumnWidth(2, 84)
+        self.table.setColumnWidth(5, 78)
+        self.table.setColumnWidth(6, 135)
+        self.table.setColumnWidth(7, 150)
 
     def set_checks(self, checked):
         for row in range(self.table.rowCount()):
