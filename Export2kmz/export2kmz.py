@@ -2,6 +2,7 @@
 """Export enabled QGIS vector layers to a KMZ file."""
 import os
 import math
+import json
 import zipfile
 import tempfile
 import xml.etree.ElementTree as ET
@@ -21,25 +22,35 @@ from qgis.core import (
 KML_NS = "http://www.opengis.net/kml/2.2"
 ET.register_namespace("", KML_NS)
 
+
 def qn(tag):
     return "{%s}%s" % (KML_NS, tag)
+
 
 def add_text(parent, tag, value):
     node = ET.SubElement(parent, qn(tag))
     node.text = "" if value is None else str(value)
     return node
 
+
 def kml_color(color, alpha=255):
     return "%02x%02x%02x%02x" % (alpha, color.blue(), color.green(), color.red())
 
+
 def coordinate(point):
-    z = point.z()
-    if math.isnan(z):
+    """Serialize QgsPoint or QgsPointXY; 2D points do not expose z()."""
+    try:
+        z = point.z() if hasattr(point, "z") else float("nan")
+        if z is None or not math.isfinite(float(z)):
+            z = 0.0
+    except (AttributeError, TypeError, ValueError):
         z = 0.0
     return "{:.8f},{:.8f},{:.3f}".format(point.x(), point.y(), z)
 
+
 def coords(points):
     return " ".join(coordinate(p) for p in points)
+
 
 def append_polygon(parent, rings):
     poly = ET.SubElement(parent, qn("Polygon"))
@@ -53,6 +64,20 @@ def append_polygon(parent, rings):
         lr = ET.SubElement(inner, qn("LinearRing"))
         add_text(lr, "coordinates", coords(ring_points))
     return poly
+
+
+def polygon_node(rings):
+    node = ET.Element(qn("Polygon"))
+    if rings:
+        outer = ET.SubElement(node, qn("outerBoundaryIs"))
+        lr = ET.SubElement(outer, qn("LinearRing"))
+        add_text(lr, "coordinates", coords(rings[0]))
+        for points in rings[1:]:
+            inner = ET.SubElement(node, qn("innerBoundaryIs"))
+            lr = ET.SubElement(inner, qn("LinearRing"))
+            add_text(lr, "coordinates", coords(points))
+    return node
+
 
 def geometry_to_kml(geometry, transform):
     g = QgsGeometry(geometry)
@@ -94,28 +119,19 @@ def geometry_to_kml(geometry, transform):
             for rings in polygons:
                 append_polygon(node, rings)
             return node
-        return append_polygon(ET.Element(qn("GeometryCollection")), polygons[0]) if False else polygon_node(polygons[0])
+        return polygon_node(polygons[0])
     return None
 
-def polygon_node(rings):
-    node = ET.Element(qn("Polygon"))
-    if rings:
-        outer = ET.SubElement(node, qn("outerBoundaryIs"))
-        lr = ET.SubElement(outer, qn("LinearRing"))
-        add_text(lr, "coordinates", coords(rings[0]))
-        for points in rings[1:]:
-            inner = ET.SubElement(node, qn("innerBoundaryIs"))
-            lr = ET.SubElement(inner, qn("LinearRing"))
-            add_text(lr, "coordinates", coords(points))
-    return node
 
 class ExportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("KMZ导出工具")
-        self.resize(1120, 590)
+        self.resize(980, 590)
+        self.setMinimumWidth(760)
         self.layers = [l for l in QgsProject.instance().mapLayers().values()
                        if isinstance(l, QgsVectorLayer) and l.isValid()]
+        self.output_path = ""
         self.build_ui()
         self.populate()
 
@@ -130,20 +146,34 @@ class ExportDialog(QDialog):
         top.addWidget(self.invert_btn)
         top.addStretch(1)
         top.addWidget(self.attrs)
+        top.addStretch(1)
+        self.export_template_btn = QPushButton("导出样式模板")
+        self.import_template_btn = QPushButton("导入样式模板")
+        top.addWidget(self.export_template_btn)
+        top.addWidget(self.import_template_btn)
         layout.addLayout(top)
+
         self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["启用", "图层", "几何类型", "字段分组", "配置样式", "图标配置", "Description"])
+        self.table.setHorizontalHeaderLabels(
+            ["启用", "图层", "几何类型", "字段分组", "配置样式", "图标配置", "Description"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for c in range(2, 7):
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        for c in range(3, 7):
             header.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        header.setStretchLastSection(False)
         layout.addWidget(self.table)
+
         bottom = QHBoxLayout()
         self.output = QLabel("输出文件：未选择")
+        self.output.setMinimumWidth(180)
+        self.output.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.browse_btn = QPushButton("浏览…")
         self.export_btn = QPushButton("导出 KMZ")
         self.cancel_btn = QPushButton("取消")
@@ -152,11 +182,14 @@ class ExportDialog(QDialog):
         bottom.addWidget(self.export_btn)
         bottom.addWidget(self.cancel_btn)
         layout.addLayout(bottom)
+
         self.all_btn.clicked.connect(lambda: self.set_checks(True))
         self.invert_btn.clicked.connect(self.invert_checks)
         self.browse_btn.clicked.connect(self.browse)
         self.export_btn.clicked.connect(self.do_export)
         self.cancel_btn.clicked.connect(self.reject)
+        self.export_template_btn.clicked.connect(self.export_template)
+        self.import_template_btn.clicked.connect(self.import_template)
 
     def populate(self):
         self.controls = []
@@ -166,26 +199,44 @@ class ExportDialog(QDialog):
             check.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             check.setCheckState(Qt.Checked)
             self.table.setItem(row, 0, check)
+
             name = QTableWidgetItem(layer.name())
             name.setFlags(name.flags() & ~Qt.ItemIsEditable)
+            name.setToolTip(layer.name())
             self.table.setItem(row, 1, name)
-            self.table.setItem(row, 2, QTableWidgetItem(QgsWkbTypes.displayString(layer.wkbType())))
+
+            geom_name = QTableWidgetItem(QgsWkbTypes.displayString(layer.wkbType()))
+            geom_name.setFlags(geom_name.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row, 2, geom_name)
+
             group = QComboBox()
-            group.addItems(["不分组"])
+            group.addItem("不分组", "")
+            for field in layer.fields():
+                group.addItem(field.name(), field.name())
             self.table.setCellWidget(row, 3, group)
+
             style = QComboBox()
             style.addItems(["默认样式", "基础样式"])
             self.table.setCellWidget(row, 4, style)
+
             icon = QComboBox()
             icon.addItems(["默认", "空心圆环", "圆点", "方形"])
             icon.setEnabled(QgsWkbTypes.geometryType(layer.wkbType()) == QgsWkbTypes.PointGeometry)
             self.table.setCellWidget(row, 5, icon)
+
             desc = QComboBox()
             desc.addItem("(不添加说明)", "")
             for field in layer.fields():
                 desc.addItem(field.name(), field.name())
             self.table.setCellWidget(row, 6, desc)
-            self.controls.append({"layer": layer, "description": desc})
+            self.controls.append({
+                "layer": layer, "group": group, "style": style,
+                "icon": icon, "description": desc
+            })
+        self.table.resizeColumnsToContents()
+        # Keep the layer-name column content-sized but prevent very long names
+        # from making the whole dialog unwieldy.
+        self.table.setColumnWidth(1, min(self.table.columnWidth(1), 260))
 
     def set_checks(self, checked):
         for row in range(self.table.rowCount()):
@@ -197,21 +248,95 @@ class ExportDialog(QDialog):
             item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
 
     def browse(self):
-        path, _ = QFileDialog.getSaveFileName(self, "保存 KMZ", "export.kmz", "KMZ 文件 (*.kmz)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存 KMZ", self.output_path or "export.kmz", "KMZ 文件 (*.kmz)")
         if path:
             if not path.lower().endswith(".kmz"):
                 path += ".kmz"
-            self.output.setText(path)
+            self.output_path = path
+            self.output.setText("输出文件：" + path)
+
+    def export_template(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出样式模板", "Export2kmz-template.json", "JSON 文件 (*.json)")
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        config = {
+            "format": "Export2kmzStyleTemplate",
+            "version": 1,
+            "show_attributes": self.attrs.isChecked(),
+            "output_path": self.output_path,
+            "layers": []
+        }
+        for row, item in enumerate(self.controls):
+            config["layers"].append({
+                "name": item["layer"].name(),
+                "enabled": self.table.item(row, 0).checkState() == Qt.Checked,
+                "group_field": item["group"].currentData() or "",
+                "style": item["style"].currentText(),
+                "icon": item["icon"].currentText(),
+                "description_field": item["description"].currentData() or ""
+            })
+        try:
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(config, stream, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "样式模板", "模板已导出：\n" + path)
+        except Exception as exc:
+            QMessageBox.critical(self, "导出模板失败", str(exc))
+
+    def import_template(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入样式模板", "", "JSON 文件 (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as stream:
+                config = json.load(stream)
+            if config.get("format") != "Export2kmzStyleTemplate":
+                raise ValueError("这不是 Export2kmz 样式模板 JSON 文件。")
+            saved_layers = {entry.get("name"): entry for entry in config.get("layers", [])}
+            for row, item in enumerate(self.controls):
+                saved = saved_layers.get(item["layer"].name())
+                if not saved:
+                    continue
+                self.table.item(row, 0).setCheckState(
+                    Qt.Checked if saved.get("enabled", True) else Qt.Unchecked)
+                self._set_combo_data(item["group"], saved.get("group_field", ""))
+                self._set_combo_text(item["style"], saved.get("style", "默认样式"))
+                self._set_combo_text(item["icon"], saved.get("icon", "默认"))
+                self._set_combo_data(item["description"], saved.get("description_field", ""))
+            self.attrs.setChecked(bool(config.get("show_attributes", True)))
+            self.output_path = config.get("output_path", "") or ""
+            self.output.setText("输出文件：" + self.output_path if self.output_path else "输出文件：未选择")
+            QMessageBox.information(self, "样式模板", "模板配置已导入。")
+        except Exception as exc:
+            QMessageBox.critical(self, "导入模板失败", str(exc))
+
+    @staticmethod
+    def _set_combo_data(combo, value):
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    @staticmethod
+    def _set_combo_text(combo, value):
+        index = combo.findText(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
 
     def do_export(self):
-        path = self.output.text()
-        if path == "输出文件：未选择":
+        path = self.output_path
+        if not path:
             self.browse()
-            path = self.output.text()
-        if path == "输出文件：未选择":
+            path = self.output_path
+        if not path:
             return
-        selected = [c for row, c in enumerate(self.controls)
-                    if self.table.item(row, 0).checkState() == Qt.Checked]
+        selected = []
+        for row, item in enumerate(self.controls):
+            if self.table.item(row, 0).checkState() == Qt.Checked:
+                selected.append(item)
         if not selected:
             QMessageBox.warning(self, "KMZ导出工具", "请至少选择一个图层。")
             return
@@ -222,15 +347,17 @@ class ExportDialog(QDialog):
         except Exception as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 
+
 def export_kmz(output_path, selected, include_attributes=True):
     doc = ET.Element(qn("kml"))
     document = ET.SubElement(doc, qn("Document"))
     add_text(document, "name", os.path.basename(output_path))
     target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+
     for item in selected:
         layer = item["layer"]
-        folder = ET.SubElement(document, qn("Folder"))
-        add_text(folder, "name", layer.name())
+        layer_folder = ET.SubElement(document, qn("Folder"))
+        add_text(layer_folder, "name", layer.name())
         renderer = layer.renderer()
         symbol = renderer.symbol() if renderer and hasattr(renderer, "symbol") else None
         color = symbol.color() if symbol else QColor("#3388ff")
@@ -254,13 +381,26 @@ def export_kmz(output_path, selected, include_attributes=True):
             line = ET.SubElement(style, qn("LineStyle"))
             add_text(line, "color", kml_color(color))
             add_text(line, "width", "1.5")
+
         transform = QgsCoordinateTransform(layer.crs(), target_crs, QgsProject.instance())
-        desc_field = item["description"].currentData()
+        group_field = item["group"].currentData() or ""
+        desc_field = item["description"].currentData() or ""
+        group_folders = {}
         for feature in layer.getFeatures():
             geom = feature.geometry()
             if geom is None or geom.isEmpty():
                 continue
-            placemark = ET.SubElement(folder, qn("Placemark"))
+            parent_folder = layer_folder
+            if group_field:
+                raw_group = feature[group_field]
+                group_name = "(空值)" if raw_group is None or str(raw_group).strip() == "" else str(raw_group)
+                if group_name not in group_folders:
+                    subfolder = ET.SubElement(layer_folder, qn("Folder"))
+                    add_text(subfolder, "name", group_name)
+                    group_folders[group_name] = subfolder
+                parent_folder = group_folders[group_name]
+
+            placemark = ET.SubElement(parent_folder, qn("Placemark"))
             name_idx = layer.fields().indexFromName("name")
             if name_idx < 0:
                 name_idx = layer.fields().indexFromName("Name")
@@ -268,24 +408,29 @@ def export_kmz(output_path, selected, include_attributes=True):
             add_text(placemark, "name", name_value)
             add_text(placemark, "styleUrl", "#" + style_id)
             if desc_field:
-                add_text(placemark, "description", feature[desc_field])
+                value = feature[desc_field]
+                if value is not None:
+                    add_text(placemark, "description", value)
             elif include_attributes:
                 extended = ET.SubElement(placemark, qn("ExtendedData"))
                 for field in layer.fields():
                     data = ET.SubElement(extended, qn("Data"), {"name": field.name()})
-                    add_text(data, "value", feature[field.name()])
+                    value = feature[field.name()]
+                    add_text(data, "value", "" if value is None else value)
             geometry_node = geometry_to_kml(geom, transform)
             if geometry_node is not None:
                 placemark.append(geometry_node)
+
     xml = ET.tostring(doc, encoding="utf-8", xml_declaration=True)
     output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         kml_path = os.path.join(tmp, "doc.kml")
-        with open(kml_path, "wb") as f:
-            f.write(xml)
+        with open(kml_path, "wb") as stream:
+            stream.write(xml)
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(kml_path, "doc.kml")
+
 
 class Export2KmzPlugin:
     def __init__(self, iface):
