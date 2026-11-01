@@ -80,46 +80,69 @@ def polygon_node(rings):
 
 
 def geometry_to_kml(geometry, transform):
+    """Convert a QGIS geometry to the matching KML geometry without changing its type."""
     g = QgsGeometry(geometry)
+
+    # Only curved geometries need segmentizing. Avoid running this on every
+    # geometry because behavior differs across QGIS versions and WKB types.
     try:
-        g.convertToStraightSegment()
-    except Exception:
+        if QgsWkbTypes.isCurvedType(g.wkbType()):
+            g.convertToStraightSegment()
+    except (AttributeError, TypeError):
         pass
-    g.transform(transform)
-    flat = QgsWkbTypes.flatType(g.wkbType())
-    multi = QgsWkbTypes.isMultiType(g.wkbType())
-    if flat == QgsWkbTypes.Point:
+
+    result = g.transform(transform)
+    # QgsGeometry.transform returns a result code; non-zero means failure.
+    if result != 0:
+        raise ValueError("坐标转换失败（QGIS 错误代码：{}）".format(result))
+
+    geometry_type = g.type()
+    multi = g.isMultipart()
+
+    if geometry_type == QgsWkbTypes.PointGeometry:
         points = g.asMultiPoint() if multi else [g.asPoint()]
+        points = [p for p in points if p is not None]
+        if not points:
+            return None
         if multi:
             node = ET.Element(qn("MultiGeometry"))
-            for p in points:
+            for point in points:
                 part = ET.SubElement(node, qn("Point"))
-                add_text(part, "coordinates", coordinate(p))
+                add_text(part, "coordinates", coordinate(point))
             return node
         node = ET.Element(qn("Point"))
         add_text(node, "coordinates", coordinate(points[0]))
         return node
-    if flat == QgsWkbTypes.LineString:
+
+    if geometry_type == QgsWkbTypes.LineGeometry:
         lines = g.asMultiPolyline() if multi else [g.asPolyline()]
+        lines = [line for line in lines if line and len(line) >= 2]
+        if not lines:
+            return None
         if multi:
             node = ET.Element(qn("MultiGeometry"))
-            for line in lines:
+            for line_points in lines:
                 part = ET.SubElement(node, qn("LineString"))
                 add_text(part, "tessellate", "1")
-                add_text(part, "coordinates", coords(line))
+                add_text(part, "coordinates", coords(line_points))
             return node
         node = ET.Element(qn("LineString"))
         add_text(node, "tessellate", "1")
         add_text(node, "coordinates", coords(lines[0]))
         return node
-    if flat == QgsWkbTypes.Polygon:
+
+    if geometry_type == QgsWkbTypes.PolygonGeometry:
         polygons = g.asMultiPolygon() if multi else [g.asPolygon()]
+        polygons = [rings for rings in polygons if rings and rings[0] and len(rings[0]) >= 4]
+        if not polygons:
+            return None
         if multi:
             node = ET.Element(qn("MultiGeometry"))
             for rings in polygons:
                 append_polygon(node, rings)
             return node
         return polygon_node(polygons[0])
+
     return None
 
 
