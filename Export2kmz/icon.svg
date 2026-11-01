@@ -1,14 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1677ff"/>
-      <stop offset="1" stop-color="#0647a6"/>
-    </linearGradient>
-  </defs>
-  <rect x="3" y="3" width="58" height="58" rx="14" fill="url(#bg)"/>
-  <circle cx="27" cy="28" r="17" fill="none" stroke="#ffffff" stroke-width="2.8"/>
-  <path d="M10 28h34M27 11c-5 5-7 11-7 17s2 12 7 17M27 11c5 5 7 11 7 17s-2 12-7 17M14 17c8 5 18 5 26 0M14 39c8-5 18-5 26 0" fill="none" stroke="#ffffff" stroke-width="1.5" opacity=".9"/>
-  <path d="M43 34l10 10-10 10-10-10z" fill="#ffd34e" stroke="#fff" stroke-width="1.5"/>
-  <path d="M39 44l3 3 5-6" fill="none" stroke="#174a91" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M44 12h8v8" fill="none" stroke="#ffd34e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#69d8ff"/><stop offset=".5" stop-color="#1687ff"/><stop offset="1" stop-color="#0752d8"/></linearGradient><linearGradient id="pin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff665b"/><stop offset="1" stop-color="#d90018"/></linearGradient><filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#003c91" flood-opacity=".35"/></filter></defs><rect x="3" y="3" width="122" height="122" rx="29" fill="url(#bg)"/><g filter="url(#sh)"><path d="M18 43L47 27L79 39L106 28V82L79 98L47 86L18 101Z" fill="#f8f8e9" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/><path d="M22 45L46 32V57L22 72Z" fill="#78dc3d"/><path d="M50 32L76 42V67L50 57Z" fill="#a0db4f"/><path d="M80 43L102 34V59L80 68Z" fill="#e4d4a1"/><path d="M22 77L46 62V82L22 96Z" fill="#32a8ff"/><path d="M50 62L76 72V93L50 83Z" fill="#58bfff"/><path d="M80 73L102 64V81L80 94Z" fill="#d9c48a"/><path d="M47 30V84M78 41V96M21 74L47 59L78 70L103 60" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M83 20C83 11 90 6 98 6S114 13 114 22C114 35 98 49 98 49S83 34 83 20Z" fill="url(#pin)" stroke="#fff" stroke-width="2.5"/><circle cx="98.5" cy="21" r="6.5" fill="#a80012"/><circle cx="96.5" cy="18.5" r="2.5" fill="#fff" opacity=".55"/></g><g filter="url(#sh)"><rect x="52" y="79" width="66" height="35" rx="9" fill="#0864ed" stroke="#fff" stroke-width="2"/><text x="85" y="102" font-family="Arial,sans-serif" font-size="20" font-weight="800" text-anchor="middle" fill="#fff" letter-spacing=".5">KMZ</text></g></svg>
