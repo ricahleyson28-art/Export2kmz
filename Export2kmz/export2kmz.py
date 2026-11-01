@@ -147,6 +147,92 @@ def geometry_to_kml(geometry, transform):
     return None
 
 
+class ExportProgressDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cancelled = False
+        self.setWindowTitle("正在导出 KMZ …")
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "icon.svg")))
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setModal(True)
+        self.setFixedWidth(470)
+        self.setStyleSheet("""
+            QDialog { background:#fff; color:#172033; font-family:"Microsoft YaHei UI","Segoe UI"; font-size:10pt; }
+            QLabel { color:#172033; } QLabel#headline { font-size:12pt; font-weight:700; }
+            QLabel#muted { color:#64748b; }
+            QProgressBar { background:#e8edf5; border:0; border-radius:5px; height:15px; text-align:center; }
+            QProgressBar::chunk { background:#1677ff; border-radius:5px; }
+            QPushButton { background:#fff; border:1px solid #cbd5e1; border-radius:5px; padding:7px 18px; }
+            QPushButton:hover { background:#eff6ff; }
+        """)
+        root=QVBoxLayout(self); root.setContentsMargins(18,15,18,14); root.setSpacing(10)
+        title_row=QHBoxLayout()
+        glyph=QLabel("▣"); glyph.setStyleSheet("font-size:20pt;color:#16a34a;")
+        title=QLabel("正在导出 KMZ …"); title.setObjectName("headline")
+        close_btn=QPushButton("×"); close_btn.setFixedSize(28,28); close_btn.clicked.connect(self.cancel)
+        title_row.addWidget(glyph); title_row.addWidget(title,1); title_row.addWidget(close_btn); root.addLayout(title_row)
+        self.current=QLabel("正在准备导出任务…"); self.current.setObjectName("muted"); root.addWidget(self.current)
+        self.bar=QProgressBar(); self.bar.setRange(0,100); self.bar.setValue(0); root.addWidget(self.bar)
+        self.percent=QLabel("0%"); self.percent.setAlignment(Qt.AlignRight); root.addWidget(self.percent)
+        root.addWidget(QFrame(frameShape=QFrame.HLine,frameShadow=QFrame.Sunken))
+        self.steps=[]
+        for label in ("读取图层信息 …","转换坐标系（EPSG:4326）…","生成 KML 文件 …","打包为 KMZ …"):
+            row=QHBoxLayout(); text_label=QLabel(label); status=QLabel("○ 等待中…")
+            status.setMinimumWidth(112); status.setAlignment(Qt.AlignRight|Qt.AlignVCenter); status.setStyleSheet("color:#94a3b8;")
+            row.addWidget(text_label,1); row.addWidget(status); root.addLayout(row); self.steps.append((text_label,status))
+        root.addWidget(QFrame(frameShape=QFrame.HLine,frameShadow=QFrame.Sunken))
+        buttons=QHBoxLayout(); buttons.addStretch(1); cancel_btn=QPushButton("取消"); cancel_btn.clicked.connect(self.cancel); buttons.addWidget(cancel_btn); root.addLayout(buttons)
+
+    def cancel(self):
+        self._cancelled=True
+        self.current.setText("正在请求取消…")
+    def wasCanceled(self):
+        return self._cancelled
+    def setValue(self,value):
+        value=max(0,min(100,int(value))); self.bar.setValue(value); self.percent.setText("{}%".format(value))
+        if value>=100: self._mark_step(3,"✓ 已完成","#16a34a")
+    def _mark_step(self,index,text,color):
+        self.steps[index][1].setText(text); self.steps[index][1].setStyleSheet("color:{};font-weight:600;".format(color))
+    def setLabelText(self,text):
+        self.current.setText(text); lowered=text.lower()
+        if "读取图层" in text or "准备导出" in text: self._mark_step(0,"◌ 进行中…","#1677ff")
+        if "坐标" in text or "正在导出图层" in text:
+            self._mark_step(0,"✓ 已完成","#16a34a"); self._mark_step(1,"◌ 进行中…","#1677ff")
+        if "生成 kml" in lowered or "生成kml" in text:
+            self._mark_step(1,"✓ 已完成","#16a34a"); self._mark_step(2,"◌ 进行中…","#1677ff")
+        if "kmz" in lowered or "打包" in text:
+            self._mark_step(2,"✓ 已完成","#16a34a"); self._mark_step(3,"◌ 进行中…","#1677ff")
+        QApplication.processEvents()
+
+
+class ExportSuccessDialog(QDialog):
+    def __init__(self,path,layer_count,total_count,stats,parent=None):
+        super().__init__(parent); self.path=path
+        self.setWindowTitle("导出成功"); self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__),"icon.svg")))
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint); self.setMinimumWidth(440)
+        self.setStyleSheet("""
+            QDialog { background:#fff; color:#172033; font-family:"Microsoft YaHei UI","Segoe UI"; font-size:10pt; }
+            QLabel { color:#172033; } QLabel#successTitle { color:#15803d; font-size:16pt; font-weight:700; }
+            QLabel#pathBox { background:#dcfce7; color:#166534; border:1px solid #bbf7d0; border-radius:5px; padding:9px; }
+            QPushButton { background:#1677ff; color:#fff; border:0; border-radius:5px; padding:8px 18px; font-weight:600; }
+            QPushButton:hover { background:#0958d9; } QPushButton#secondary { background:#fff; color:#334155; border:1px solid #cbd5e1; }
+        """)
+        root=QVBoxLayout(self); root.setContentsMargins(20,18,20,16); root.setSpacing(10)
+        title_row=QHBoxLayout(); badge=QLabel("✓"); badge.setAlignment(Qt.AlignCenter); badge.setFixedSize(44,44)
+        badge.setStyleSheet("background:#22c55e;color:white;border-radius:22px;font-size:25pt;font-weight:700;")
+        stack=QVBoxLayout(); title=QLabel("导出成功！"); title.setObjectName("successTitle")
+        stack.addWidget(title); stack.addWidget(QLabel("文件已成功导出到："))
+        title_row.addWidget(badge); title_row.addLayout(stack,1); root.addLayout(title_row)
+        path_row=QHBoxLayout(); path_label=QLabel(path); path_label.setObjectName("pathBox"); path_label.setWordWrap(True); path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        copy_btn=QPushButton("复制"); copy_btn.setObjectName("secondary"); copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.path))
+        path_row.addWidget(path_label,1); path_row.addWidget(copy_btn); root.addLayout(path_row)
+        root.addWidget(QFrame(frameShape=QFrame.HLine,frameShadow=QFrame.Sunken))
+        heading=QLabel("导出统计"); heading.setStyleSheet("font-weight:700;font-size:11pt;"); root.addWidget(heading)
+        for label,value in (("图层数量",str(layer_count)),("导出要素总数","{:,}".format(total_count)),("点要素","{:,}".format(stats.get("point",0))),("线要素","{:,}".format(stats.get("line",0))),("面要素","{:,}".format(stats.get("polygon",0)))):
+            row=QHBoxLayout(); key=QLabel(label); val=QLabel(value); val.setAlignment(Qt.AlignRight|Qt.AlignVCenter); val.setStyleSheet("font-weight:600;"); row.addWidget(key,1); row.addWidget(val); root.addLayout(row)
+        buttons=QHBoxLayout(); buttons.addStretch(1); ok=QPushButton("确定"); ok.clicked.connect(self.accept); buttons.addWidget(ok); root.addLayout(buttons)
+
+
 class ExportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -423,56 +509,17 @@ class ExportDialog(QDialog):
             QMessageBox.warning(self, "KMZ导出工具", "请至少选择一个图层。")
             return
 
-        progress = QProgressDialog("正在读取图层信息…", "取消导出", 0, 100, self)
-        progress.setWindowTitle("正在导出 KMZ")
-        progress.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "icon.svg")))
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
-        progress.setMinimumWidth(460)
-        progress.setStyleSheet("""
-            QProgressDialog { background: white; font-family: "Microsoft YaHei UI", "Segoe UI"; font-size: 10pt; }
-            QLabel { color: #172033; padding: 5px; }
-            QProgressBar { background: #e8edf5; border: 0; border-radius: 5px; height: 14px; text-align: center; }
-            QProgressBar::chunk { background: #1677ff; border-radius: 5px; }
-            QPushButton { background: white; border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 14px; }
-        """)
+        progress = ExportProgressDialog(self)
         progress.show()
         QApplication.processEvents()
         try:
             count, geometry_stats = export_kmz(path, selected, self.attrs.isChecked(), progress)
             progress.setValue(100)
-            progress.setLabelText("✓  KMZ 文件已生成。")
+            progress.setLabelText("KMZ 文件已生成。")
             QApplication.processEvents()
             progress.close()
-            absolute_path = os.path.abspath(path)
-            success = QMessageBox(self)
-            success.setWindowTitle("导出成功")
-            success.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "icon.svg")))
-            success.setIcon(QMessageBox.Information)
-            success.setText("<span style='color:#15803d;font-size:17pt;font-weight:700'>✓  导出成功！</span>")
-            success.setInformativeText(
-                "<div style='font-size:10pt;color:#172033'>文件已成功导出到：</div>"
-                "<div style='background:#dcfce7;border:1px solid #bbf7d0;border-radius:5px;"
-                "padding:9px;color:#166534;margin-top:6px'>{}</div>"
-                "<hr><b>导出统计</b><br>图层数量：{}<br>成功导出要素总数：{:,}"
-                "<br>点要素：{:,}<br>线要素：{:,}<br>面要素：{:,}".format(
-                    absolute_path, len(selected), count,
-                    geometry_stats["point"], geometry_stats["line"], geometry_stats["polygon"]
-                )
-            )
-            copy_button = success.addButton("复制文件路径", QMessageBox.ActionRole)
-            success.addButton("确定", QMessageBox.AcceptRole)
-            success.setStyleSheet("""
-                QMessageBox { background: white; min-width: 420px; font-family: "Microsoft YaHei UI", "Segoe UI"; }
-                QLabel { color: #172033; min-width: 360px; }
-                QPushButton { background: #1677ff; color: white; border: 0; border-radius: 5px; padding: 7px 16px; }
-                QPushButton:hover { background: #0958d9; }
-            """)
+            success = ExportSuccessDialog(os.path.abspath(path), len(selected), count, geometry_stats, self)
             success.exec_()
-            if success.clickedButton() == copy_button:
-                QApplication.clipboard().setText(absolute_path)
             self.accept()
         except InterruptedError:
             progress.close()
