@@ -12,7 +12,7 @@ from qgis.PyQt.QtWidgets import (
     QAction, QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QFileDialog, QMessageBox,
     QHeaderView, QComboBox, QLabel, QCheckBox, QAbstractItemView,
-    QProgressDialog, QApplication
+    QProgressDialog, QApplication, QProgressBar
 )
 from qgis.PyQt.QtGui import QColor, QIcon
 from qgis.core import (
@@ -153,6 +153,16 @@ class ExportDialog(QDialog):
         self.setWindowTitle("KMZ导出工具")
         self.resize(980, 590)
         self.setMinimumWidth(760)
+        self.setStyleSheet("""
+            QDialog { background: #f5f7fb; color: #172033; font-family: "Microsoft YaHei UI", "Segoe UI"; font-size: 10pt; }
+            QPushButton { background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 13px; color: #172033; }
+            QPushButton:hover { background: #edf5ff; border-color: #6aa7ff; }
+            QPushButton#primaryButton { background: #1677ff; color: white; border: 1px solid #1677ff; font-weight: 600; }
+            QTableWidget { background: white; alternate-background-color: #f7faff; border: 1px solid #cbd5e1; gridline-color: #dbe3ef; selection-background-color: #dbeafe; selection-color: #172033; }
+            QHeaderView::section { background: #eef3fa; font-weight: 600; border: 0; border-right: 1px solid #d3dce9; border-bottom: 1px solid #cbd5e1; padding: 8px 5px; }
+            QComboBox { background: white; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px 6px; min-height: 22px; }
+            QLabel#outputPath { background: white; border: 1px solid #cbd5e1; border-radius: 5px; padding: 8px; }
+        """)
         self.layers = [l for l in QgsProject.instance().mapLayers().values()
                        if isinstance(l, QgsVectorLayer) and l.isValid()]
         self.output_path = ""
@@ -195,11 +205,14 @@ class ExportDialog(QDialog):
         layout.addWidget(self.table)
 
         bottom = QHBoxLayout()
-        self.output = QLabel("输出文件：未选择")
+        self.output = QLabel("请选择 KMZ 保存位置")
+        self.output.setObjectName("outputPath")
         self.output.setMinimumWidth(180)
         self.output.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.output.setToolTip("导出文件的完整保存路径")
         self.browse_btn = QPushButton("浏览…")
-        self.export_btn = QPushButton("导出 KMZ")
+        self.export_btn = QPushButton("↓  导出 KMZ")
+        self.export_btn.setObjectName("primaryButton")
         self.cancel_btn = QPushButton("取消")
         bottom.addWidget(self.output, 1)
         bottom.addWidget(self.browse_btn)
@@ -278,7 +291,8 @@ class ExportDialog(QDialog):
             if not path.lower().endswith(".kmz"):
                 path += ".kmz"
             self.output_path = path
-            self.output.setText("输出文件：" + path)
+            self.output.setText(path)
+            self.output.setToolTip(path)
 
     def export_template(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -333,7 +347,8 @@ class ExportDialog(QDialog):
                 self._set_combo_data(item["description"], saved.get("description_field", ""))
             self.attrs.setChecked(bool(config.get("show_attributes", True)))
             self.output_path = config.get("output_path", "") or ""
-            self.output.setText("输出文件：" + self.output_path if self.output_path else "输出文件：未选择")
+            self.output.setText(self.output_path if self.output_path else "请选择 KMZ 保存位置")
+            self.output.setToolTip(self.output_path)
             QMessageBox.information(self, "样式模板", "模板配置已导入。")
         except Exception as exc:
             QMessageBox.critical(self, "导入模板失败", str(exc))
@@ -365,25 +380,52 @@ class ExportDialog(QDialog):
             QMessageBox.warning(self, "KMZ导出工具", "请至少选择一个图层。")
             return
 
-        progress = QProgressDialog("正在准备导出…", "取消", 0, 100, self)
-        progress.setWindowTitle("Export2KMZ")
+        progress = QProgressDialog("正在读取图层信息…", "取消导出", 0, 100, self)
+        progress.setWindowTitle("正在导出 KMZ")
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
         progress.setAutoClose(False)
         progress.setAutoReset(False)
-        progress.resize(430, 120)
+        progress.setMinimumWidth(460)
+        progress.setStyleSheet("""
+            QProgressDialog { background: white; font-family: "Microsoft YaHei UI", "Segoe UI"; font-size: 10pt; }
+            QLabel { color: #172033; padding: 5px; }
+            QProgressBar { background: #e8edf5; border: 0; border-radius: 5px; height: 14px; text-align: center; }
+            QProgressBar::chunk { background: #1677ff; border-radius: 5px; }
+            QPushButton { background: white; border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 14px; }
+        """)
         progress.show()
         QApplication.processEvents()
         try:
             count = export_kmz(path, selected, self.attrs.isChecked(), progress)
             progress.setValue(100)
-            progress.setLabelText("导出完成。")
+            progress.setLabelText("✓  KMZ 文件已生成。")
             QApplication.processEvents()
             progress.close()
-            QMessageBox.information(
-                self, "导出成功",
-                "KMZ 导出成功！\\n\\n文件位置：\\n{}\\n\\n导出要素数量：{} 个".format(path, count)
+            absolute_path = os.path.abspath(path)
+            success = QMessageBox(self)
+            success.setWindowTitle("导出成功")
+            success.setIcon(QMessageBox.Information)
+            success.setText("<span style='color:#15803d;font-size:17pt;font-weight:700'>✓  导出成功！</span>")
+            success.setInformativeText(
+                "<div style='font-size:10pt;color:#172033'>文件已成功导出到：</div>"
+                "<div style='background:#dcfce7;border:1px solid #bbf7d0;border-radius:5px;"
+                "padding:9px;color:#166534;margin-top:6px'>{}</div>"
+                "<hr><b>导出统计</b><br>图层数量：{}<br>成功导出要素总数：{:,}".format(
+                    absolute_path, len(selected), count
+                )
             )
+            copy_button = success.addButton("复制文件路径", QMessageBox.ActionRole)
+            success.addButton("确定", QMessageBox.AcceptRole)
+            success.setStyleSheet("""
+                QMessageBox { background: white; min-width: 420px; font-family: "Microsoft YaHei UI", "Segoe UI"; }
+                QLabel { color: #172033; min-width: 360px; }
+                QPushButton { background: #1677ff; color: white; border: 0; border-radius: 5px; padding: 7px 16px; }
+                QPushButton:hover { background: #0958d9; }
+            """)
+            success.exec_()
+            if success.clickedButton() == copy_button:
+                QApplication.clipboard().setText(absolute_path)
             self.accept()
         except InterruptedError:
             progress.close()
