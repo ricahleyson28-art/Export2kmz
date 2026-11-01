@@ -397,7 +397,7 @@ class ExportDialog(QDialog):
         progress.show()
         QApplication.processEvents()
         try:
-            count = export_kmz(path, selected, self.attrs.isChecked(), progress)
+            count, geometry_stats = export_kmz(path, selected, self.attrs.isChecked(), progress)
             progress.setValue(100)
             progress.setLabelText("✓  KMZ 文件已生成。")
             QApplication.processEvents()
@@ -411,8 +411,10 @@ class ExportDialog(QDialog):
                 "<div style='font-size:10pt;color:#172033'>文件已成功导出到：</div>"
                 "<div style='background:#dcfce7;border:1px solid #bbf7d0;border-radius:5px;"
                 "padding:9px;color:#166534;margin-top:6px'>{}</div>"
-                "<hr><b>导出统计</b><br>图层数量：{}<br>成功导出要素总数：{:,}".format(
-                    absolute_path, len(selected), count
+                "<hr><b>导出统计</b><br>图层数量：{}<br>成功导出要素总数：{:,}"
+                "<br>点要素：{:,}<br>线要素：{:,}<br>面要素：{:,}".format(
+                    absolute_path, len(selected), count,
+                    geometry_stats["point"], geometry_stats["line"], geometry_stats["polygon"]
                 )
             )
             copy_button = success.addButton("复制文件路径", QMessageBox.ActionRole)
@@ -442,6 +444,7 @@ def export_kmz(output_path, selected, include_attributes=True, progress=None):
     total_features = sum(item["layer"].featureCount() for item in selected)
     processed = 0
     exported_count = 0
+    geometry_stats = {"point": 0, "line": 0, "polygon": 0}
     if progress:
         progress.setValue(0)
         progress.setLabelText("正在导出图层…")
@@ -516,6 +519,13 @@ def export_kmz(output_path, selected, include_attributes=True, progress=None):
             if geometry_node is not None:
                 placemark.append(geometry_node)
                 exported_count += 1
+                geom_type = QgsWkbTypes.geometryType(layer.wkbType())
+                if geom_type == QgsWkbTypes.PointGeometry:
+                    geometry_stats["point"] += 1
+                elif geom_type == QgsWkbTypes.LineGeometry:
+                    geometry_stats["line"] += 1
+                elif geom_type == QgsWkbTypes.PolygonGeometry:
+                    geometry_stats["polygon"] += 1
 
             processed += 1
             if progress:
@@ -542,7 +552,7 @@ def export_kmz(output_path, selected, include_attributes=True, progress=None):
             stream.write(xml)
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(kml_path, "doc.kml")
-    return exported_count
+    return exported_count, geometry_stats
 
 
 class Export2KmzPlugin:
