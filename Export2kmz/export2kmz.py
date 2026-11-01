@@ -150,7 +150,8 @@ def geometry_to_kml(geometry, transform):
 class ExportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("KMZ导出工具")
+        self.setWindowTitle("Export2KMZ")
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "icon.svg")))
         self.resize(1120, 700)
         self.setMinimumSize(900, 540)
         self.setStyleSheet("""
@@ -273,11 +274,14 @@ class ExportDialog(QDialog):
             style.addItems(["默认样式", "基础样式"])
             self.table.setCellWidget(row, 4, style)
 
-            status = QTableWidgetItem("● 默认")
+            status = QTableWidgetItem("● 未配置")
             status.setTextAlignment(Qt.AlignCenter)
             status.setForeground(QColor("#64748b"))
             status.setFlags(status.flags() & ~Qt.ItemIsEditable)
             self.table.setItem(row, 5, status)
+            style.currentIndexChanged.connect(
+                lambda index, r=row: self.update_status(r, index)
+            )
 
             icon = QComboBox()
             icon.addItems(["默认", "空心圆环", "圆点", "方形"])
@@ -302,6 +306,17 @@ class ExportDialog(QDialog):
         self.table.setColumnWidth(5, 78)
         self.table.setColumnWidth(6, 135)
         self.table.setColumnWidth(7, 150)
+
+    def update_status(self, row, index):
+        item = self.table.item(row, 5)
+        if item is None:
+            return
+        if index == 0:
+            item.setText("● 未配置")
+            item.setForeground(QColor("#64748b"))
+        else:
+            item.setText("● 已配置")
+            item.setForeground(QColor("#16803c"))
 
     def set_checks(self, checked):
         for row in range(self.table.rowCount()):
@@ -410,6 +425,7 @@ class ExportDialog(QDialog):
 
         progress = QProgressDialog("正在读取图层信息…", "取消导出", 0, 100, self)
         progress.setWindowTitle("正在导出 KMZ")
+        progress.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "icon.svg")))
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
         progress.setAutoClose(False)
@@ -433,6 +449,7 @@ class ExportDialog(QDialog):
             absolute_path = os.path.abspath(path)
             success = QMessageBox(self)
             success.setWindowTitle("导出成功")
+            success.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "icon.svg")))
             success.setIcon(QMessageBox.Information)
             success.setText("<span style='color:#15803d;font-size:17pt;font-weight:700'>✓  导出成功！</span>")
             success.setInformativeText(
